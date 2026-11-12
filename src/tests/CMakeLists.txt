@@ -1,0 +1,11 @@
+add_executable(descriptor-test descriptors.cpp)
+set_target_properties(descriptor-test PROPERTIES COMPILE_FLAGS "-std=c++11 -Wall -Wextra")
+add_test(NAME gadgetfs-descriptors COMMAND descriptor-test)
+
+if(TARGET DeviceProxy_LibUSB)
+	add_executable(interrupt-reader-test interrupt_reader.cpp)
+	target_include_directories(interrupt-reader-test PRIVATE ${libusbproxy_SOURCE_DIR} ${LIBUSB_INCLUDE_DIR})
+	set_target_properties(interrupt-reader-test PROPERTIES COMPILE_FLAGS "-std=c++11 -Wall -Wextra")
+	target_link_libraries(interrupt-reader-test ${CMAKE_THREAD_LIBS_INIT})
+	add_test(NAME interrupt-reader COMMAND interrupt-reader-test)
+endif()

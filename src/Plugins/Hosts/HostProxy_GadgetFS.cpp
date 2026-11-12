@@ -8,12 +8,12 @@
 
 #include <unistd.h>
 #include <poll.h>
-#include <math.h>
 #include <thread>
 #include <sys/ioctl.h>
 
 #include "HostProxy_GadgetFS.h"
 #include "GadgetFS_helpers.h"
+#include "GadgetFS_descriptors.h"
 #include "errno.h"
 #include "TRACE.h"
 #include "HexString.h"
@@ -30,6 +30,8 @@ HostProxy_GadgetFS::HostProxy_GadgetFS(ConfigParser *cfg)
 	: HostProxy(*cfg)
 	, m()
 {
+	bool stats = cfg->get("ReportStats") == "true";
+	for (auto& rate : reportRates) rate.enable(stats);
 	mount_gadget();
 	p_is_connected = false;
 	p_device_file=0;
@@ -57,6 +59,7 @@ HostProxy_GadgetFS::~HostProxy_GadgetFS() {
 int HostProxy_GadgetFS::generate_descriptor(Device* device) {
 	char *ptr;
 	int i;
+	const bool hasOtherSpeed = device->get_device_qualifier() != nullptr;
 	descriptor=(char*)malloc(USB_BUFSIZE);
 
 	ptr = descriptor;
@@ -78,6 +81,11 @@ int HostProxy_GadgetFS::generate_descriptor(Device* device) {
 			buf->bDescriptorType=USB_DT_CONFIG;
 			buf->bmAttributes&=(~USB_CONFIG_ATT_WAKEUP);
 			buf->wTotalLength=length;
+			if (!gadgetfs::adapt_configuration(buf, length,
+			        device->is_highspeed() && !hasOtherSpeed, false)) {
+				free(buf);
+				return 1;
+			}
 			memcpy(ptr,buf,length);
 			free(buf);
 			ptr+=length;
@@ -96,36 +104,10 @@ int HostProxy_GadgetFS::generate_descriptor(Device* device) {
 			buf->bDescriptorType=USB_DT_CONFIG;
 			buf->bmAttributes&=(~USB_CONFIG_ATT_WAKEUP);
 			buf->wTotalLength=length;
-			/* Adjust polling rate for high speed descriptor */
-			if(!device->is_highspeed()) {
-			    char* pointer = (char*) buf;
-			    pointer += buf->bLength;    //move to end of cfg desc
-
-			    for(unsigned int k=0;k<buf->bNumInterfaces;k++){
-				//move to end of intf desc
-				pointer += cfg->get_interface(k)->get_descriptor()->bLength;
-
-				if(cfg->get_interface(k)->has_HID()){
-				    pointer+= cfg->get_interface(k)->get_HID_descriptor_length();
-				}
-
-				for(int gen_idx = 0; gen_idx < cfg->get_interface(k)->get_generic_descriptor_count();gen_idx++){
-				    pointer+= cfg->get_interface(k)->get_generic_descriptor(gen_idx)->bLength;
-				}
-
-				for(int ep_idx = 0; ep_idx < cfg->get_interface(k)->get_descriptor()->bNumEndpoints;ep_idx++){
-				    usb_endpoint_descriptor* epd = (usb_endpoint_descriptor*) pointer;
-
-				    // conversion is: newValue = log2(8*oldValue)+1
-
-				    uint8_t newValue = (log10(8*(epd->bInterval))/log10(2)) + 1;
-				    if (debugLevel > 0) {
-				        fprintf(stderr,"old bInterval: %02X\ncalculated new bInterval: %02X\n",epd->bInterval,newValue);
-				    }
-				    memset(&epd->bInterval,newValue,1);
-				    pointer+= epd->bLength;
-				}
-			    }
+			if (!gadgetfs::adapt_configuration(buf, length,
+			        device->is_highspeed() || hasOtherSpeed, true)) {
+				free(buf);
+				return 1;
 			}
 			memcpy(ptr,buf,length);
 			free(buf);
@@ -549,6 +531,7 @@ bool HostProxy_GadgetFS::send_wait_complete(__u8 endpoint,int timeout) {
 		}
 		if (debugLevel > 2)
 			std::cerr << "Sent " << rc << " bytes to gadgetfs EP" << std::hex << (unsigned)endpoint << std::dec << '\n';
+		if (rc > 0 && p_epin_interrupt[number]) reportRates[number].record("Pi->host", endpoint);
 		p_epin_active[number]=false;
 		return true;
 	}
@@ -648,7 +631,7 @@ void HostProxy_GadgetFS::setConfig(Configuration* fs_cfg,Configuration* hs_cfg,b
 		int aifc_cnt = fs_cfg->get_interface_alternate_count( ifc_idx);
 		for ( aifc_idx=0; aifc_idx < aifc_cnt; aifc_idx++) {
 			Interface* fs_aifc=fs_cfg->get_interface_alternate(ifc_idx, aifc_idx);
-			Interface* hs_aifc=hs_cfg?hs_cfg->get_interface_alternate(aifc_idx, aifc_idx):fs_aifc;
+			Interface* hs_aifc=hs_cfg?hs_cfg->get_interface_alternate(ifc_idx, aifc_idx):fs_aifc;
 			hs_aifc=hs_aifc?hs_aifc:fs_aifc;
 			__u8 ep_count=fs_aifc->get_endpoint_count();
 			int ep_idx;
@@ -661,6 +644,17 @@ void HostProxy_GadgetFS::setConfig(Configuration* fs_cfg,Configuration* hs_cfg,b
 
 				memcpy(buf+4,fs_ep,fs_ep->bLength);
 				memcpy(buf+4+fs_ep->bLength,hs_ep,hs_ep->bLength);
+				// Without an other-speed configuration both pointers refer to the
+				// source descriptor. Adapt the endpoint copies just as at EP0.
+				gadgetfs::adapt_endpoint((usb_endpoint_descriptor*)(buf + 4),
+				                         hs && !hs_cfg, false);
+				gadgetfs::adapt_endpoint((usb_endpoint_descriptor*)(buf + 4 + fs_ep->bLength),
+				                         (hs_ep != fs_ep) || (hs && !hs_cfg), true);
+				if (debugLevel) {
+					fprintf(stderr, "EP%02x bInterval: FS=%u HS=%u\n", fs_ep->bEndpointAddress,
+					        ((usb_endpoint_descriptor*)(buf + 4))->bInterval,
+					        ((usb_endpoint_descriptor*)(buf + 4 + fs_ep->bLength))->bInterval);
+				}
 
 				__u8 epAddress=fs_ep->bEndpointAddress;
 
@@ -680,6 +674,7 @@ void HostProxy_GadgetFS::setConfig(Configuration* fs_cfg,Configuration* hs_cfg,b
 				aio->aio_fildes = fd;
 				aio->aio_sigevent.sigev_notify = SIGEV_NONE;
 				if (epAddress & 0x80) {
+					p_epin_interrupt[epAddress & 0x0f] = (fs_ep->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) == USB_ENDPOINT_XFER_INT;
 					p_epin_async[epAddress&0x0f]=aio;
 				} else {
 					if (hs) {

@@ -13,6 +13,9 @@
 #include "DeviceProxy.h"
 
 #include <vector>
+#include <atomic>
+#include <memory>
+#include "InterruptReader.h"
 
 class DeviceProxy_LibUSB: public DeviceProxy {
 private:
@@ -33,7 +36,10 @@ private:
 	} epInterfaces[0x10];
 
 	bool endpoint_interface_claimed(uint8_t endpoint);
-	unsigned nice;
+	unsigned nice = 0;
+	bool reportStats = false;
+	std::atomic<bool> eventsStop{false};
+	std::unique_ptr<InterruptReader> interruptReaders[16];
 	std::thread libusbThread;
 	void libusbEventLoop();
 
@@ -67,7 +73,7 @@ public:
 	uint8_t get_address();
 	char* toString();
 	void setNice(unsigned nice);
-	bool please_stop;
+	std::atomic<bool> please_stop;
 	int rxAttempt = 0;
 };
 

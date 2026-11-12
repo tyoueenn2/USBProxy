@@ -9,6 +9,7 @@ extern "C" {
 #include <linux/usb/gadgetfs.h>
 }
 #include "HostProxy.h"
+#include "ReportRate.h"
 #include <pthread.h>
 #include <unistd.h>
 #include <mutex>
@@ -19,6 +20,8 @@ extern "C" {
 
 class HostProxy_GadgetFS: public HostProxy {
 private:
+	bool p_epin_interrupt[16] = {};
+	ReportRate reportRates[16];
 	bool p_is_connected;
 	int p_device_file;
 	const char* device_filename;

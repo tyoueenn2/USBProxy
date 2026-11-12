@@ -108,6 +108,7 @@ DeviceProxy_LibUSB::DeviceProxy_LibUSB(ConfigParser *cfg) :
 		productId = stoi(str, nullptr, 16);
 	cerr << "productId = " << hex4(productId) << endl;
 
+	reportStats = cfg->get("ReportStats") == "true";
 	str = cfg->get("DeviceProxy::nice");
 	if (str == "")
 		nice = 0;
@@ -137,21 +138,7 @@ DeviceProxy_LibUSB::DeviceProxy_LibUSB(ConfigParser *cfg) :
 }
 
 DeviceProxy_LibUSB::~DeviceProxy_LibUSB() {
-	// for handling events of hotplug.
-	please_stop = true;
-	if (context && callback_handle != -1) {
-		libusb_hotplug_deregister_callback(context, callback_handle);
-	}
-
-	if (privateDevice && dev_handle) {
-		libusb_close(dev_handle);
-	}
-	if (privateContext && context) {
-		libusb_exit(context);
-	}
-	if (libusbThread.joinable()) {
-		libusbThread.join();
-	}
+	disconnect();
 }
 
 void DeviceProxy_LibUSB::setNice(unsigned nice_)
@@ -208,8 +195,9 @@ int DeviceProxy_LibUSB::connect(libusb_device_handle* devh, libusb_context* _con
 
 void DeviceProxy_LibUSB::libusbEventLoop() {
 	fprintf(stderr,"Starting libusbEventLoop thread (%ld) \n",gettid());
-	while(!please_stop) {
-		libusb_handle_events(context);
+	while(!eventsStop) {
+		timeval timeout = {0, 100000};
+		libusb_handle_events_timeout(context, &timeout);
 	}
 	fprintf(stderr,"Finished libusbEventLoop thread (%ld) \n",gettid());
 }
@@ -336,6 +324,7 @@ int DeviceProxy_LibUSB::connect(int vendorId, int productId, bool includeHubs) {
 		else
 		{
 			please_stop = false;
+			eventsStop = false;
 			libusbThread = std::thread(&DeviceProxy_LibUSB::libusbEventLoop, this);
 		}
 	}
@@ -343,6 +332,11 @@ int DeviceProxy_LibUSB::connect(int vendorId, int productId, bool includeHubs) {
 }
 
 void DeviceProxy_LibUSB::disconnect() {
+	please_stop = true;
+	// Cancellation callbacks need the event loop and open device handle.
+	for (auto& reader : interruptReaders) reader.reset();
+	eventsStop = true;
+	if (libusbThread.joinable()) libusbThread.join();
 	// for handling events of hotplug.
 	if (context && callback_handle != -1) {
 		libusb_hotplug_deregister_callback(context, callback_handle);
@@ -518,6 +512,19 @@ void DeviceProxy_LibUSB::receive_data(uint8_t endpoint, uint8_t attributes, uint
 
 	if (!endpoint_interface_claimed(endpoint)) {
 		//do not try to receive if interface wasn't claimed successfully
+		return;
+	}
+
+	if ((endpoint & USB_DIR_IN) &&
+	    (attributes & USB_ENDPOINT_XFERTYPE_MASK) == USB_ENDPOINT_XFER_INT) {
+		auto& reader = interruptReaders[endpoint & 0x0f];
+		if (!reader) reader.reset(new InterruptReader(dev_handle, endpoint, maxPacketSize, reportStats));
+		int rc = reader->receive(dataptr, length, timeout);
+		if (rc && rc != LIBUSB_ERROR_TIMEOUT && !please_stop) {
+			cerr << "Interrupt IN error on EP" << hex2(endpoint) << ": "
+			     << libusb_strerror((libusb_error)rc) << endl;
+			disconnect_notifier(this);
+		}
 		return;
 	}
 
