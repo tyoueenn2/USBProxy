@@ -30,7 +30,6 @@ HostProxy_GadgetFS::HostProxy_GadgetFS(ConfigParser *cfg)
 	: HostProxy(*cfg)
 	, m()
 {
-	hid1000Hz = cfg->get("HID::1000Hz") == "true";
 	bool stats = cfg->get("ReportStats") == "true";
 	for (auto& rate : reportRates) rate.enable(stats);
 	mount_gadget();
@@ -83,7 +82,7 @@ int HostProxy_GadgetFS::generate_descriptor(Device* device) {
 			buf->bmAttributes&=(~USB_CONFIG_ATT_WAKEUP);
 			buf->wTotalLength=length;
 			if (!gadgetfs::adapt_configuration(buf, length,
-			        device->is_highspeed() && !hasOtherSpeed, false, hid1000Hz)) {
+			        device->is_highspeed() && !hasOtherSpeed, false)) {
 				free(buf);
 				return 1;
 			}
@@ -106,7 +105,7 @@ int HostProxy_GadgetFS::generate_descriptor(Device* device) {
 			buf->bmAttributes&=(~USB_CONFIG_ATT_WAKEUP);
 			buf->wTotalLength=length;
 			if (!gadgetfs::adapt_configuration(buf, length,
-			        device->is_highspeed() || hasOtherSpeed, true, hid1000Hz)) {
+			        device->is_highspeed() || hasOtherSpeed, true)) {
 				free(buf);
 				return 1;
 			}
@@ -645,13 +644,12 @@ void HostProxy_GadgetFS::setConfig(Configuration* fs_cfg,Configuration* hs_cfg,b
 
 				memcpy(buf+4,fs_ep,fs_ep->bLength);
 				memcpy(buf+4+fs_ep->bLength,hs_ep,hs_ep->bLength);
-				const __u8 interfaceClass = fs_aifc->get_descriptor()->bInterfaceClass;
 				// Without an other-speed configuration both pointers refer to the
 				// source descriptor. Adapt the endpoint copies just as at EP0.
-				gadgetfs::adapt_endpoint((usb_endpoint_descriptor*)(buf + 4), interfaceClass,
-				                         hs && !hs_cfg, false, hid1000Hz);
-				gadgetfs::adapt_endpoint((usb_endpoint_descriptor*)(buf + 4 + fs_ep->bLength), interfaceClass,
-				                         (hs_ep != fs_ep) || (hs && !hs_cfg), true, hid1000Hz);
+				gadgetfs::adapt_endpoint((usb_endpoint_descriptor*)(buf + 4),
+				                         hs && !hs_cfg, false);
+				gadgetfs::adapt_endpoint((usb_endpoint_descriptor*)(buf + 4 + fs_ep->bLength),
+				                         (hs_ep != fs_ep) || (hs && !hs_cfg), true);
 				if (debugLevel) {
 					fprintf(stderr, "EP%02x bInterval: FS=%u HS=%u\n", fs_ep->bEndpointAddress,
 					        ((usb_endpoint_descriptor*)(buf + 4))->bInterval,

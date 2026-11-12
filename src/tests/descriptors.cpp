@@ -34,24 +34,48 @@ int main() {
 		7,5,0x83,2,64,0,0
 	};
 	auto native = cfg;
-	CHECK(adapt_configuration(cfg.data(), cfg.size(), false, true, false));
+	CHECK(adapt_configuration(cfg.data(), cfg.size(), false, true));
 	CHECK(cfg[41] == 4 && cfg[48] == 7 && cfg[64] == 8 && cfg[80] == 0);
 	CHECK(native[41] == 1 && native[64] == 16); // source remains intact
 	cfg = native;
-	CHECK(adapt_configuration(cfg.data(), cfg.size(), false, true, true));
-	CHECK(cfg[41] == 4 && cfg[48] == 7 && cfg[64] == 4 && cfg[80] == 0);
-	cfg = native;
-	CHECK(adapt_configuration(cfg.data(), cfg.size(), false, false, true));
-	CHECK(cfg[41] == 1 && cfg[48] == 8 && cfg[64] == 1 && cfg[80] == 0);
-	// Pre-existing HS descriptors must not be converted a second time.
-	cfg[41] = 4;
-	CHECK(adapt_configuration(cfg.data(), cfg.size(), true, true, false));
-	CHECK(cfg[41] == 4);
+	CHECK(adapt_configuration(cfg.data(), cfg.size(), false, false));
+	CHECK(cfg == native); // no rate changes when source/target speed match
+	// Native HS schedules are kept exactly, including sub-millisecond rates.
+	const struct { unsigned hz; unsigned char interval; } rates[] = {
+		{500, 5}, {1000, 4}, {2000, 3}, {4000, 2}, {8000, 1}
+	};
+	for (const auto& rate : rates) {
+		cfg = native;
+		cfg[41] = rate.interval;
+		auto advertised = cfg;
+		CHECK(adapt_configuration(advertised.data(), advertised.size(), true, true));
+		CHECK(advertised == cfg);
+		CHECK(8000u / (1u << (advertised[41] - 1)) == rate.hz);
+		// Endpoint configuration must agree with the advertised configuration.
+		usb_endpoint_descriptor ep = {};
+		ep.bLength = USB_DT_ENDPOINT_SIZE;
+		ep.bDescriptorType = USB_DT_ENDPOINT;
+		ep.bEndpointAddress = 0x81;
+		ep.bmAttributes = USB_ENDPOINT_XFER_INT;
+		ep.bInterval = rate.interval;
+		adapt_endpoint(&ep, true, true);
+		CHECK(ep.bInterval == advertised[41]);
+	}
+	// All valid HS encodings, including slow endpoints, survive unchanged.
+	for (unsigned char interval = 1; interval <= 16; ++interval)
+		CHECK(interrupt_interval(interval, true, true) == interval);
+	// FS mouse schedules map to the same elapsed time at HS.
+	for (unsigned char interval : {1, 2, 4, 8, 16}) {
+		cfg = native;
+		cfg[41] = interval;
+		CHECK(adapt_configuration(cfg.data(), cfg.size(), false, true));
+		CHECK((1u << (cfg[41] - 1)) * 125 == unsigned(interval) * 1000);
+	}
 	unsigned char bad[] = {0, 5};
-	CHECK(!adapt_configuration(bad, sizeof(bad), false, true, false));
+	CHECK(!adapt_configuration(bad, sizeof(bad), false, true));
 	unsigned char truncated[] = {7, 5, 0x81};
-	CHECK(!adapt_configuration(truncated, sizeof(truncated), false, true, false));
+	CHECK(!adapt_configuration(truncated, sizeof(truncated), false, true));
 	unsigned char shortEp[] = {2, 5};
-	CHECK(!adapt_configuration(shortEp, sizeof(shortEp), false, true, false));
+	CHECK(!adapt_configuration(shortEp, sizeof(shortEp), false, true));
 	puts("descriptor tests passed");
 }

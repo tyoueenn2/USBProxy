@@ -1,9 +1,16 @@
-# 1000 Hz mouse forwarding on Raspberry Pi 4
+# Native mouse polling rates on Raspberry Pi 4
 
-This fork adds queued interrupt IN reads, consistent GadgetFS polling intervals,
-and an optional 1 ms HID mode. The goal is to preserve a 1000 Hz mouse's report
-rate through the Pi. Hardware measurements are still required; a successful
-build or a 1000 Hz descriptor does not establish the actual forwarding rate.
+USBProxy preserves the mouse's advertised interrupt polling interval and forwards
+each incoming report as it arrives. There is no polling-rate setting in the
+proxy. A mouse producing 500, 1000 or 8000 reports/s uses the same forwarding
+path, without a timer that resamples, duplicates or discards reports to reach a
+chosen rate.
+
+High-speed USB interrupt intervals are kept unchanged. When a full-speed source
+is represented to Windows at high speed, only the descriptor's interval encoding
+changes, preserving the elapsed polling interval where representable. For
+intervals that are not representable exactly, the host-facing schedule is rounded
+toward faster polling so the source's reports need not be throttled.
 
 ## Build this fork on the Pi
 
@@ -37,26 +44,33 @@ these changes. If CMake 4 rejects the upstream minimum version, add
 Find the mouse's VID:PID with `lsusb`, then replace the example IDs below:
 
 ```sh
-sudo /usr/local/bin/usb-mitm -v 046d -p c077 --mouse-1000hz --stats
+sudo /usr/local/bin/usb-mitm -v 046d -p c077 --stats
 ```
 
-`--mouse-1000hz` advertises a 1 ms interval on **all HID interrupt IN endpoints**
-of the selected USB device, including any keyboard/vendor HID interfaces in a
-composite mouse. It does not rewrite HID report formats, bulk endpoints or HID
-OUT polling. The FS interval is 1 and the HS interval is 4 (eight 125 us
-microframes). Without this option, the source's timing is preserved, with the
-necessary conversion when the Pi's host-facing speed differs.
+`--stats` enables measurement only. It does not change polling or report contents.
+The mouse's firmware, active profile and USB endpoint descriptors determine its
+report cadence. USB control requests for the mouse are still forwarded.
 
-This option changes the host-facing descriptors only. It cannot make the
-physical mouse produce reports faster than its firmware, selected profile, and
-Linux host controller allow. Configure a 1000 Hz profile in the mouse itself
-before proxying. A slower source can leave the host polling without new data.
-Sub-millisecond/2000–8000 Hz operation is not promised by this 1 ms mode.
+| Mouse/host-facing USB schedule | bInterval | Polling interval | Maximum scheduled polls/s |
+| --- | --- | --- | --- |
+| Full speed | 2 | 2 ms | 500 |
+| Full speed | 1 | 1 ms | 1000 |
+| High speed | 5 | 2 ms | 500 |
+| High speed | 4 | 1 ms | 1000 |
+| High speed | 3 | 500 us | 2000 |
+| High speed | 2 | 250 us | 4000 |
+| High speed | 1 | 125 us | 8000 |
 
-Replug the gadget cable or restart USBProxy after changing descriptor options so
-Windows enumerates the new descriptors. Start without packet logging (`-l`,
-`-w`, `-z`) or verbose debugging when measuring throughput. `-n` affects bulk
-reads only and does not set the mouse rate.
+A polling interval defines bus service opportunities; an idle mouse need not
+produce a report for every poll. An 8000 Hz schedule requires high-speed USB.
+If the gadget negotiates full speed, its 1 ms minimum polling interval cannot
+carry 8000 separate interrupt reports/s. Check negotiated speed rather than
+changing rate settings in the proxy.
+
+Replug the gadget cable or restart USBProxy after installing this version so
+Windows enumerates the corrected descriptors. Start without packet logging
+(`-l`, `-w`, `-z`) or verbose debugging when measuring throughput. `-n` affects
+bulk reads only and does not set the mouse rate.
 
 ## Measure where the rate changes
 
@@ -67,43 +81,45 @@ Move the mouse continuously and look for one line per second per active endpoint
 [rate] Pi->host EP81: 998.9 reports/s
 ```
 
-These are illustrative values, not measured results. Input counts completed
-nonempty interrupt transfers from the physical device; output counts completed
-nonempty GadgetFS writes. Each endpoint has its own counter. Quiet endpoints
-and the first interval after idle can show low values; compare steady movement.
+These are illustrative values for a 1000 Hz source, not measured results. An
+8000 Hz source should instead be compared against approximately 8000 reports/s
+on both sides; a 500 Hz source against approximately 500 reports/s. Input counts
+completed nonempty interrupt transfers from the physical device; output counts
+completed nonempty GadgetFS writes. Quiet endpoints and the first interval after
+idle can show low values; compare steady movement on the same endpoint.
 
-- Input near 1000 and output near 1000: forwarding is keeping up. If a browser
-  still shows 60, check a native Windows Raw Input polling-rate tool and, if
-  needed, a USB trace. Browser pointer events can be coalesced or frame-limited.
-- Input near 1000 and output near 60: the bottleneck is toward Windows. Inspect
-  the gadget's interrupt endpoint with USB Device Tree Viewer/USBView. For a
-  1 ms endpoint, expect `bInterval=4` at high speed or `1` at full speed. Run once
-  with `-d` to print the endpoint intervals configured on the Pi, then disable
-  debug logging for the measurement. Check cable, gadget driver and OS details.
-- Input itself is slow: inspect the physical mouse's endpoint `bInterval` with
-  `sudo lsusb -v -d VID:PID` and negotiated speed with `lsusb -t` on the Pi.
-  Compare the mouse's onboard profile and the native Windows driver settings.
+- Matching input/output rates near the source's configured rate indicate that
+  forwarding is keeping up. If a browser still shows 60, check a native Windows
+  Raw Input polling-rate tool and, if needed, a USB trace. Browser pointer events
+  can be coalesced or frame-limited.
+- Fast input with slow output locates the bottleneck toward Windows. Inspect the
+  gadget's interrupt endpoint with USB Device Tree Viewer/USBView. Compare its
+  negotiated speed and bInterval with the table above. Run once with `-d` to
+  print the endpoint intervals configured on the Pi, then disable debugging for
+  measurements. Check cable, gadget driver and OS details.
+- Slow input locates the bottleneck before forwarding to Windows. Inspect the
+  physical mouse's endpoint `bInterval` with `sudo lsusb -v -d VID:PID` and
+  negotiated speed with `lsusb -t` on the Pi. Compare the mouse's onboard profile
+  and the native Windows driver settings.
 
-The async input queue retains reports in order and keeps eight USB reads
-pending. If the host falls behind by 256 queued reports, USBProxy reports an
-overflow and resets the device session rather than silently dropping movement
-or button transitions. Include the rate lines, device descriptors, Pi OS/kernel
-version and mouse model when reporting a remaining slowdown.
+The async input queue retains reports in order and keeps eight USB reads pending.
+If the host falls behind by 256 queued reports, USBProxy reports an overflow and
+resets the device session rather than silently dropping movement or button
+transitions. This is a backlog limit, not a report-rate limit. Include the rate
+lines, device descriptors, Pi OS/kernel version and mouse model when reporting a
+remaining slowdown.
 
-## What changed
+## Validation and implementation
 
-The old code converted FS interrupt intervals only in the high-speed EP0
-configuration blob, used floating-point logarithms, traversed only the first
-alternate setting, and also tried to convert bulk endpoints. Endpoint setup
-then reused the unconverted interval, and the other-speed interface lookup used
-the alternate-setting index as the interface number. The conversion is now
-shared by advertised configurations and configured endpoints, and native HS
-intervals are kept intact. Integer conversion maps, for example, FS 1 ms to
-HS `bInterval=4` and FS 16 ms to HS `bInterval=8` (62.5 Hz).
+The changes have been built and tested on x86-64. Descriptor tests verify that
+native high-speed schedules for 500, 1000, 2000, 4000 and 8000 Hz remain unchanged,
+and that full-speed to high-speed conversion preserves 1, 2, 4, 8 and 16 ms
+intervals. Both the advertised configurations and configured endpoints use the
+same conversion. Fake-transport tests cover report order/rearming, idle timeouts,
+ZLPs, overflow, unplug, submission errors and cancellation cleanup.
 
-Interrupt IN uses a continuously rearmed eight-transfer libusb pipeline, with
-ordered delivery, finite relay waits, and cancellation callbacks drained before
-the device handle/context are closed. Bulk forwarding retains its existing
-behavior. Tests cover descriptor conversion, composite/alternate interfaces,
-malformed descriptor bounds, report order, rearming, zero-length packets,
-timeouts, overflow, unplug and submission failures, and cancellation cleanup.
+Preserving descriptors and passing software tests do not establish achieved
+hardware throughput. Pi/Windows measurements are still required at each rate.
+The interrupt input path continuously rearms transfers; the output path waits
+for transfer completion instead of using a fixed reporting timer. Bulk forwarding
+retains its existing behavior.

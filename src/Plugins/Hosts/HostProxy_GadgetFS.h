@@ -20,7 +20,6 @@ extern "C" {
 
 class HostProxy_GadgetFS: public HostProxy {
 private:
-	bool hid1000Hz;
 	bool p_epin_interrupt[16] = {};
 	ReportRate reportRates[16];
 	bool p_is_connected;

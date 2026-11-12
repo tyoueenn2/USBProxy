@@ -35,7 +35,7 @@ class InterruptReader {
 		if (!stopping && !error) {
 			if (transfer->status == LIBUSB_TRANSFER_COMPLETED) {
 				// Fail visibly instead of silently losing mouse/button reports if
-				// the host cannot keep up (roughly 256 ms at 1000 Hz).
+				// the host cannot keep up. The bound is a report count, not a rate.
 				if (reports.size() >= 256) error = LIBUSB_ERROR_OVERFLOW;
 				else {
 					reports.emplace_back(transfer->buffer, transfer->buffer + transfer->actual_length);
