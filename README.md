@@ -10,6 +10,13 @@ USB Proxy for Raspberry Pi (armhf)
 [![https://github.com/nesto-software/USBProxy2](https://img.shields.io/badge/superseded%20by-USBProxy2-yellow)](https://github.com/nesto-software/USBProxy2)
 [![https://github.com/nesto-software/ProxySuite](https://img.shields.io/badge/part%20of-ProxySuite-blue)](https://github.com/nesto-software/ProxySuite)
 
+1000 Hz Mouse Forwarding (this fork)
+------
+For Raspberry Pi 4 mouse forwarding, see [build, run and measurement instructions](docs/mouse-polling.md).
+This fork adds queued interrupt reads, corrected GadgetFS polling descriptors,
+`--mouse-1000hz`, and `--stats`. Build this fork from source; the upstream binary
+installation commands below install Nesto's original version.
+
 Heads Up!
 ------
 This project is currently being refactored by Nesto.   

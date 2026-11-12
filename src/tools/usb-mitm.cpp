@@ -3,6 +3,7 @@
  */
 
 #include <errno.h>
+#include <getopt.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
@@ -48,6 +49,8 @@ void usage(char *arg) {
 	printf("\t-k Keylogger with ROT13 filter (for demo), specify optional filename to output to instead of stderr\n");
 	printf("\t-w <filename> Write to pcap file for viewing in Wireshark\n");
 	printf("\t-z Enable ZeroMQ filter\n");
+	printf("\t--mouse-1000hz Advertise a 1 ms polling interval on HID interrupt IN endpoints\n");
+	printf("\t--stats Print interrupt input/output report rates once per second\n");
 	printf("\t-h Display this message\n");
 }
 
@@ -86,8 +89,20 @@ int main(int argc, char **argv)
 
 	cfg->set("DeviceProxy::nice", "50");
 
-	while ((opt = getopt (argc, argv, "v:p:P:D:H:dsc:C:lmik::w:hxn:z")) != EOF) {
+	const option longOptions[] = {
+		{"mouse-1000hz", no_argument, nullptr, 1000},
+		{"stats", no_argument, nullptr, 1001},
+		{"help", no_argument, nullptr, 'h'},
+		{nullptr, 0, nullptr, 0}
+	};
+	while ((opt = getopt_long(argc, argv, "v:p:P:D:H:dsc:C:lmik::w:hxn:z", longOptions, nullptr)) != EOF) {
 		switch (opt) {
+		case 1000:
+			cfg->set("HID::1000Hz", "true");
+			break;
+		case 1001:
+			cfg->set("ReportStats", "true");
+			break;
 		case 'v':
 			cfg->set("vendorId", optarg);
 			break;
@@ -166,6 +181,8 @@ int main(int argc, char **argv)
 			break;
 
 		case 'h':
+			usage(argv[0]);
+			return 0;
 		default:
 			usage(argv[0]);
 			return 1;

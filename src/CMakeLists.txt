@@ -27,7 +27,15 @@ set(CMAKE_CPP_FLAGS "${CMAKE_CPP_FLAGS} -g -Wshadow -Wpointer-arith  -Wcast-alig
 add_subdirectory(lib)
 add_subdirectory(Plugins)
 add_subdirectory(tools)
-add_subdirectory(greengrass)
+option(BUILD_GREENGRASS "Build the optional AWS Greengrass executable" ON)
+if(BUILD_GREENGRASS)
+	add_subdirectory(greengrass)
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+	add_subdirectory(tests)
+endif()
 
 # Create uninstall target
 configure_file(

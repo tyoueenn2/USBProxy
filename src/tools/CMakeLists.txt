@@ -4,6 +4,10 @@
 
 set(TOOL usb-mitm)
 
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../../VERSION" USBPROXY_VERSION LIMIT_COUNT 1)
+configure_file(version.h.in "${CMAKE_CURRENT_BINARY_DIR}/version.h" @ONLY)
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
+
 include_directories(${libusbproxy_SOURCE_DIR})
 LIST(APPEND TOOLS_LINK_LIBS USBProxy -pthread zmq)
 
