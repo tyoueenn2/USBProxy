@@ -17,6 +17,7 @@ This fork preserves the mouse's native polling interval automatically, with queu
 interrupt reads, corrected GadgetFS descriptors and optional `--stats` counters.
 Build this fork from source; the upstream binary installation commands below
 install Nesto's original version.
+See [testing](docs/testing.md) for automated regression checks and Pi/Windows validation.
 
 Heads Up!
 ------

@@ -20,9 +20,9 @@ that already works for USBProxy. Stop the existing USBProxy process first.
 
 ```sh
 sudo apt update
-sudo apt install -y git build-essential cmake pkg-config libusb-1.0-0-dev \
+sudo apt install -y git build-essential cmake pkg-config python3 libusb-1.0-0-dev \
     libzmq3-dev cppzmq-dev libmsgpack-dev libboost-dev
-git clone --branch fix/mouse-polling https://github.com/tyoueenn2/USBProxy.git
+git clone https://github.com/tyoueenn2/USBProxy.git
 cd USBProxy
 cmake -S src -B src/build -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_GREENGRASS=OFF -DBUILD_TESTING=ON
@@ -123,3 +123,6 @@ hardware throughput. Pi/Windows measurements are still required at each rate.
 The interrupt input path continuously rearms transfers; the output path waits
 for transfer completion instead of using a fixed reporting timer. Bulk forwarding
 retains its existing behavior.
+
+See [testing.md](testing.md) for the automated suites, sanitizer builds, CI and
+a repeatable Pi/Windows hardware validation procedure.

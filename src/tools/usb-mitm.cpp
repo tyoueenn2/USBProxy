@@ -84,7 +84,8 @@ int main(int argc, char **argv)
 	sigaction(SIGTERM, &action, NULL);
 	sigaction(SIGINT, &action, NULL);
 
-	ConfigParser *cfg = new ConfigParser();
+	ConfigParser config;
+	ConfigParser *cfg = &config;
 
 	cfg->set("DeviceProxy::nice", "50");
 

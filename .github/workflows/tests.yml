@@ -1,0 +1,63 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86-64
+            os: ubuntu-24.04
+            build_type: Release
+            sanitizer_flags: ""
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+            build_type: Release
+            sanitizer_flags: ""
+          - name: Address and undefined behavior sanitizers
+            os: ubuntu-24.04
+            build_type: Debug
+            sanitizer_flags: "-fsanitize=address,undefined -fno-omit-frame-pointer"
+    env:
+      CFLAGS: ${{ matrix.sanitizer_flags }}
+      CXXFLAGS: ${{ matrix.sanitizer_flags }}
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config python3 \
+            libusb-1.0-0-dev libzmq3-dev cppzmq-dev libmsgpack-cxx-dev \
+            libboost-dev libpcap-dev
+      - name: Configure
+        run: >-
+          cmake -S src -B src/build
+          -DBUILD_GREENGRASS=OFF -DBUILD_TESTING=ON
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+      - name: Build
+        run: cmake --build src/build --parallel 2
+      - name: Test
+        run: ctest --test-dir src/build --output-on-failure --output-junit results.xml
+      - name: Save test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.build_type }}
+          path: |
+            src/build/results.xml
+            src/build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore

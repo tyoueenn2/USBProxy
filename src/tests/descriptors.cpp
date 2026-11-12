@@ -1,6 +1,7 @@
 #include "../Plugins/Hosts/GadgetFS_descriptors.h"
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 #define CHECK(test) do { if (!(test)) { fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #test); exit(1); } } while (0)
@@ -70,6 +71,27 @@ int main() {
 		cfg[41] = interval;
 		CHECK(adapt_configuration(cfg.data(), cfg.size(), false, true));
 		CHECK((1u << (cfg[41] - 1)) * 125 == unsigned(interval) * 1000);
+	}
+	// Every valid FS interval must map to a legal HS service interval no
+	// slower than the source, and the next exponent must be too slow.
+	for (unsigned interval = 1; interval <= 255; ++interval) {
+		unsigned encoded = interrupt_interval(interval, false, true);
+		unsigned microframes = 1u << (encoded - 1);
+		CHECK(encoded >= 1 && encoded <= 16);
+		CHECK(microframes <= interval * 8 && microframes * 2 > interval * 8);
+	}
+	// Non-interrupt endpoints and all their descriptor fields stay intact.
+	for (unsigned char type : {USB_ENDPOINT_XFER_CONTROL, USB_ENDPOINT_XFER_ISOC, USB_ENDPOINT_XFER_BULK}) {
+		usb_endpoint_descriptor ep = {};
+		ep.bLength = USB_DT_ENDPOINT_SIZE;
+		ep.bDescriptorType = USB_DT_ENDPOINT;
+		ep.bEndpointAddress = 0x81;
+		ep.bmAttributes = type;
+		ep.wMaxPacketSize = 64;
+		ep.bInterval = 10;
+		auto original = ep;
+		adapt_endpoint(&ep, false, true);
+		CHECK(memcmp(&ep, &original, sizeof(ep)) == 0);
 	}
 	unsigned char bad[] = {0, 5};
 	CHECK(!adapt_configuration(bad, sizeof(bad), false, true));
