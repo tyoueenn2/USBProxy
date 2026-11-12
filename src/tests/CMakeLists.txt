@@ -1,6 +1,22 @@
+find_package(Threads REQUIRED)
+
 add_executable(descriptor-test descriptors.cpp)
 set_target_properties(descriptor-test PROPERTIES COMPILE_FLAGS "-std=c++11 -Wall -Wextra")
 add_test(NAME gadgetfs-descriptors COMMAND descriptor-test)
+set_tests_properties(gadgetfs-descriptors PROPERTIES TIMEOUT 10 LABELS "descriptors")
+
+add_executable(gadgetfs-integration-test gadgetfs_integration.cpp ../Plugins/Hosts/HostProxy_GadgetFS.cpp)
+target_include_directories(gadgetfs-integration-test PRIVATE ${libusbproxy_SOURCE_DIR})
+set_target_properties(gadgetfs-integration-test PROPERTIES
+	COMPILE_FLAGS "-std=c++11 -Wall -Wextra"
+	LINK_FLAGS "-Wl,--wrap=write -Wl,--wrap=close -Wl,--wrap=aio_cancel")
+target_link_libraries(gadgetfs-integration-test USBProxy zmq rt ${CMAKE_THREAD_LIBS_INIT})
+add_test(NAME gadgetfs-enumeration-endpoints COMMAND gadgetfs-integration-test)
+set_tests_properties(gadgetfs-enumeration-endpoints PROPERTIES TIMEOUT 15 LABELS "integration;descriptors")
+
+find_package(PythonInterp 3 REQUIRED)
+add_test(NAME cli-options COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli.py $<TARGET_FILE:usb-mitm>)
+set_tests_properties(cli-options PROPERTIES TIMEOUT 10 LABELS "cli")
 
 if(TARGET DeviceProxy_LibUSB)
 	add_executable(interrupt-reader-test interrupt_reader.cpp)
@@ -8,4 +24,12 @@ if(TARGET DeviceProxy_LibUSB)
 	set_target_properties(interrupt-reader-test PROPERTIES COMPILE_FLAGS "-std=c++11 -Wall -Wextra")
 	target_link_libraries(interrupt-reader-test ${CMAKE_THREAD_LIBS_INIT})
 	add_test(NAME interrupt-reader COMMAND interrupt-reader-test)
+	set_tests_properties(interrupt-reader PROPERTIES TIMEOUT 15 LABELS "transfers")
+	foreach(rate 500 1000 8000)
+		add_test(NAME interrupt-stream-${rate} COMMAND interrupt-reader-test stream ${rate})
+		set_tests_properties(interrupt-stream-${rate} PROPERTIES TIMEOUT 20 LABELS "concurrency;transfers")
+	endforeach()
+	add_test(NAME interrupt-endpoint-isolation COMMAND interrupt-reader-test endpoints)
+	add_test(NAME interrupt-stop-wakeup COMMAND interrupt-reader-test stop)
+	set_tests_properties(interrupt-endpoint-isolation interrupt-stop-wakeup PROPERTIES TIMEOUT 15 LABELS "concurrency;transfers")
 endif()
