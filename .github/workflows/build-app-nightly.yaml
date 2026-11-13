@@ -15,7 +15,11 @@ env:
 
 jobs:
   build-and-package:
+    # Publishing requires Nesto's private registry, signing and AWS setup.
+    if: github.repository == 'nesto-software/USBProxy'
     name: Build nesto-usbproxy debian package
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/${{ github.repository_owner }}/usb-proxy-dev:latest
@@ -24,12 +28,12 @@ jobs:
         password: ${{ secrets.CR_PAT }}
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
         path: 'usbproxy'
         ref: 'dev'
 
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
         repository: fsaintjacques/semver-tool
         path: semver
@@ -71,10 +75,12 @@ jobs:
 
     # TODO: move the devscripts installation into docker container image build
     - name: Change the package version to reflect a nightly build
+      id: version
       working-directory: usbproxy
       run: |
         VERSION=$(cat ./VERSION)
         NEW_VERSION=$(semver bump patch $VERSION)
+        echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_OUTPUT"
         apt-get install -y devscripts
         cd ./src && dch -v ${NEW_VERSION}~$(date +%s)-${GITHUB_SHA}-${GITHUB_RUN_NUMBER} --distribution nightly "$(git log -1 --pretty=%B)" --force-distribution
 
@@ -84,7 +90,7 @@ jobs:
         dpkg-buildpackage -d -aarmhf -tarm-rpi-linux-gnueabihf -uc -us
 
     - name: Archive production artifacts
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: debian-package
         path: |
@@ -96,38 +102,39 @@ jobs:
         zip usb-mitm.zip usb-mitm-gg
 
     - name: Upload Release Asset - Greengrass Deployment Package
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: greengrass-deployment-package
         path: |
           usbproxy/src/build/greengrass/usb-mitm.zip
           
     - name: Upload Release Asset - Standalone Binary
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: standalone-binary
         path: |
           usbproxy/src/build/tools/usb-mitm
 
     - name: Upload Release Asset - Debian Package
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: nesto-usbproxy_${{ steps.version.outputs.NEW_VERSION }}_armhf.deb
         path: |
-          usbproxy/nesto-usbproxy_${{ steps.version.outputs.NEW_VERSION }}_armhf.deb
+          usbproxy/*.deb
 
     - name: Release via gh releases with latest tag
-      uses: marvinpinto/action-automatic-releases@latest
+      uses: softprops/action-gh-release@v2
       with:
-        repo_token: ${{ secrets.GITHUB_TOKEN }}
-        automatic_release_tag: nightly-latest
+        tag_name: nightly-latest
         prerelease: false
-        title: UsbProxy - Nightly Binary Release (latest)
+        name: UsbProxy - Nightly Binary Release (latest)
         files: |
           usbproxy/src/build/greengrass/usb-mitm-gg
           usbproxy/src/build/tools/usb-mitm
 
   upload-package:
+    # Publishing requires Nesto's private registry, signing and AWS setup.
+    if: github.repository == 'nesto-software/USBProxy'
     name: Upload nesto-usbproxy debian package into nesto repository in S3
     runs-on: ubuntu-latest
     needs: build-and-package
@@ -139,7 +146,7 @@ jobs:
 
     steps:
     - name: Download debian package from artifacts
-      uses: actions/download-artifact@v2
+      uses: actions/download-artifact@v4
       with:
         name: debian-package
 
