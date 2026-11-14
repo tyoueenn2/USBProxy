@@ -5,11 +5,24 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
 
 permissions:
   contents: read
 
 jobs:
+  workflows:
+    name: Validate workflow files
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check all workflow expressions and action versions
+        uses: docker://rhysd/actionlint:1.7.7
+        with:
+          args: -color -shellcheck=
+
   build-and-test:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}

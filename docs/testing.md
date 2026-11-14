@@ -43,11 +43,21 @@ ctest --test-dir src/build -L concurrency --output-on-failure
 
 ## Continuous integration
 
-The `tests` GitHub Actions workflow runs on pull requests and pushes to `master`.
-It builds on Linux x86-64 and ARM64, plus an x86-64 build with AddressSanitizer
+The `tests` GitHub Actions workflow runs on pull requests, pushes to `master`,
+a daily schedule and manual dispatch. Its workflow-validation job runs a pinned
+`actionlint` version against every workflow file, including jobs that do not run
+on pull requests. It builds on Linux x86-64 and ARM64, plus an x86-64 build with AddressSanitizer
 and UndefinedBehaviorSanitizer. It installs public distro packages and requires
 no Nesto credentials or AWS SDK. JUnit results and the CTest log are saved as
-artifacts for every job. The workflow has read-only repository permissions.
+artifacts for each build job. The workflow has read-only repository permissions.
+
+The inherited `build-app-release`, `build-app-nightly`, `build-aptly` and
+`build-container` workflows publish through Nesto's private containers, GPG keys
+and AWS setup. Their jobs run only in `nesto-software/USBProxy` and are skipped
+in this fork, including on manual dispatch. They do not provide this fork's
+build/test coverage; the public `tests` workflow runs the native builds, test
+suites and sanitizers. Building release binaries here remains a source-build
+operation until a fork-specific packaging pipeline is added.
 
 To run a sanitizer build locally with GCC or Clang:
 

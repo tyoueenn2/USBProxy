@@ -4,27 +4,29 @@ on:
     paths:
       - 'VERSION'
     branches: master
-    
-env:
-  TOOLCHAIN_RELEASE: rpi-5.10.y
+  workflow_dispatch:
 
 jobs:
   build-and-package:
+    # Publishing requires Nesto's private registry, signing and AWS setup.
+    if: github.repository == 'nesto-software/USBProxy'
     name: Build nesto-usbproxy debian package
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/${{ github.repository_owner }}/usb-proxy-dev:${{ env.TOOLCHAIN_RELEASE }}
+      image: ghcr.io/${{ github.repository_owner }}/usb-proxy-dev:rpi-5.10.y
       credentials:
         username: ${{ github.repository_owner }}
         password: ${{ secrets.CR_PAT }}
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
         path: 'usbproxy'
         ref: 'master'
 
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
         repository: fsaintjacques/semver-tool
         path: semver
@@ -68,7 +70,7 @@ jobs:
       id: version
       run: |
         NEW_VERSION=$(cat ./VERSION)
-        echo "::set-output name=NEW_VERSION::$NEW_VERSION"
+        echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Build the debian package
       working-directory: usbproxy/src
@@ -76,56 +78,29 @@ jobs:
         dpkg-buildpackage -d -aarmhf -tarm-rpi-linux-gnueabihf -uc -us
 
     - name: Archive production artifacts
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: debian-package
         path: |
           usbproxy/*.deb
 
-    - name: Push a new tag
-      id: tag_version
-      uses: mathieudutour/github-tag-action@v5.1
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        custom_tag: "${{ steps.version.outputs.NEW_VERSION }}"
-
-    - name: Create a GitHub release
-      uses: actions/create-release@v1
-      id: create_release
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ steps.tag_version.outputs.new_tag }}
-        release_name: Release ${{ steps.tag_version.outputs.new_tag }}
-        body: "Signed-off-by: ${{ github.actor }}"
-
     - name: Compress the release asset
       run: |
         tar -cvjSf nesto-usbproxy_${{ steps.version.outputs.NEW_VERSION }}_armhf.tar.bz2 usbproxy/nesto-usbproxy_${{ steps.version.outputs.NEW_VERSION }}_armhf.deb
 
-    - name: Upload Release Asset - Debian Package
-      uses: actions/upload-release-asset@v1
-      id: upload-release-asset 
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Publish GitHub release
+      uses: softprops/action-gh-release@v2
       with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: usbproxy/nesto-usbproxy_${{ steps.version.outputs.NEW_VERSION }}_armhf.deb
-        asset_name: nesto-usbproxy_${{ steps.version.outputs.NEW_VERSION }}_armhf.deb
-        asset_content_type: application/vnd.debian.binary-package
-
-    - name: Upload Release Asset - Archive
-      uses: actions/upload-release-asset@v1
-      id: upload-release-asset-archive
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: nesto-usbproxy_${{ steps.version.outputs.NEW_VERSION }}_armhf.tar.bz2
-        asset_name: nesto-usbproxy_${{ steps.version.outputs.NEW_VERSION }}_armhf.tar.bz2
-        asset_content_type: application/vnd.debian.binary-package
+        tag_name: v${{ steps.version.outputs.NEW_VERSION }}
+        name: Release v${{ steps.version.outputs.NEW_VERSION }}
+        body: "Signed-off-by: ${{ github.actor }}"
+        files: |
+          usbproxy/nesto-usbproxy_${{ steps.version.outputs.NEW_VERSION }}_armhf.deb
+          nesto-usbproxy_${{ steps.version.outputs.NEW_VERSION }}_armhf.tar.bz2
 
   upload-package:
+    # Publishing requires Nesto's private registry, signing and AWS setup.
+    if: github.repository == 'nesto-software/USBProxy'
     name: Upload nesto-usbproxy debian package into nesto repository in S3
     runs-on: ubuntu-latest
     needs: build-and-package
@@ -137,7 +112,7 @@ jobs:
 
     steps:
     - name: Download debian package from artifacts
-      uses: actions/download-artifact@v2
+      uses: actions/download-artifact@v4
       with:
         name: debian-package
 
